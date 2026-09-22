@@ -1,0 +1,18 @@
+{
+  "required": true,
+  "minVersion": "0.8",
+  "package": "lol.bkd.antichud.mixin.client",
+  "compatibilityLevel": "JAVA_21",
+  "client": [
+    "SplashOverlayMixin",
+    "LoadingOverlayLogoMixin",
+    "LoadingOverlayLogoTextureMixin",
+    "PackRepositoryMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  },
+  "overwrites": {
+    "requireAnnotations": true
+  }
+}

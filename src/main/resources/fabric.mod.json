@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 1,
+  "id": "antichud",
+  "version": "${version}",
+  "name": "antichud",
+  "description": "A simple anticheat.",
+  "authors": [],
+  "contact": {},
+  "license": "All-Rights-Reserved",
+  "icon": "assets/antichud/icon.png",
+  "environment": "client",
+  "entrypoints": {
+    "fabric-datagen": [
+      "lol.bkd.antichud.client.AntichudDataGenerator"
+    ],
+    "client": [
+      "lol.bkd.antichud.client.AntichudClient"
+    ],
+    "main": [
+      "lol.bkd.antichud.Antichud"
+    ]
+  },
+  "mixins": [
+    "antichud.mixins.json",
+    {
+      "config": "antichud.client.mixins.json",
+      "environment": "client"
+    }
+  ],
+  "depends": {
+    "fabricloader": ">=${loader_version}",
+    "fabric-api": "*",
+    "minecraft": "${minecraft_version}"
+  },
+  "custom": {
+    "fabric:resource_load_order": {
+      "after": ["*"]
+    }
+  }
+}
