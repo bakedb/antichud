@@ -7,7 +7,9 @@
     "SplashOverlayMixin",
     "LoadingOverlayLogoMixin",
     "LoadingOverlayLogoTextureMixin",
-    "PackRepositoryMixin"
+    "PackRepositoryMixin",
+    "TitleScreenMixin",
+    "ConnectScreenMixin"
   ],
   "injectors": {
     "defaultRequire": 1
