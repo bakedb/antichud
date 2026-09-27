@@ -1,7 +1,7 @@
 import json, logging
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
-logging.basicConfig(filename="antichud.log", level=logging.INFO)
+logging.basicConfig(filename="antichud.log", level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
 class LogHandler(BaseHTTPRequestHandler):
     def do_POST(self):
