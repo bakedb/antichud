@@ -1,18 +1,71 @@
 import java.security.MessageDigest
 import java.nio.file.Files
-import java.nio.file.Paths
 import java.util.HexFormat
 
 plugins {
-    id 'fabric-loom' version '1.18-SNAPSHOT'
+    id 'fabric-loom' version "${loom_version}"
     id 'maven-publish'
 }
 
-version = project.mod_version
-group = project.maven_group
+// Stonecutter runs this script once per entry in settings.gradle, so everything below is
+// evaluated against that entry's versions/<minecraft version>/gradle.properties.
+def mcVersion = property('minecraft_version') as String
+def loaderVersion = property('loader_version') as String
+def apiVersion = property('fabric_version') as String
+
+// Minecraft 26.1 dropped obfuscation, so the jar needs no mappings and no remapping.
+// The matching property lives next to the per version dependencies.
+def unobfuscated = sc.current.parsed.matches('>=26.1')
+// Two later releases moved things again: 26.2 moved screen handling onto Gui, and 26.3 renamed
+// the render pipeline package and split Pack.ResourcesSupplier in two.
+def guiScreens = sc.current.parsed.matches('>=26.2')
+def splitPacks = sc.current.parsed.matches('>=26.3')
+def targetJavaVersion = Integer.parseInt(property('java_version') as String)
+
+// One jar per Minecraft version, e.g. antichud-0.2+26.3.jar
+version = "${property('mod_version')}+${mcVersion}"
+group = property('maven_group') as String
 
 base {
-    archivesName = project.archives_base_name
+    archivesName = property('archives_base_name') as String
+}
+
+stonecutter {
+    // Minecraft 26.x renamed the GUI drawing class, the render pipeline package and a handful of
+    // methods. Those are pure textual renames, so they are expressed as replacements rather than
+    // as `//? if` conditions to keep the sources readable.
+    replacements.string(unobfuscated) {
+        // 26.1: GuiGraphics -> GuiGraphicsExtractor, and the text drawing methods were renamed.
+        replace 'GuiGraphics', 'GuiGraphicsExtractor'
+        replace 'graphics.drawString(', 'graphics.text('
+        replace 'graphics.drawCenteredString(', 'graphics.centeredText('
+        replace 'renderTransparentBackground', 'extractTransparentBackground'
+
+        // 26.1: screens extract their render state instead of drawing straight away.
+        replace '"render"', '"extractRenderState"'
+        replace 'void render(', 'void extractRenderState('
+        replace 'super.render(', 'super.extractRenderState('
+
+        // Fabric API 0.155 renamed the builtin pack source and the payload registries.
+        replace 'BuiltinModResourcePackSource', 'BuiltinModPackSource'
+        replace 'PayloadTypeRegistry.playC2S()', 'PayloadTypeRegistry.serverboundPlay()'
+        replace 'PayloadTypeRegistry.playS2C()', 'PayloadTypeRegistry.clientboundPlay()'
+    }
+
+    replacements.string(guiScreens) {
+        // 26.2: the current screen moved off Minecraft onto Gui.
+        replace 'minecraft.setScreen(', 'minecraft.gui.setScreen('
+        replace 'Minecraft.getInstance().setScreen(', 'Minecraft.getInstance().gui.setScreen('
+    }
+
+    replacements.string(splitPacks) {
+        // 26.3: blaze3d was renamed to renderpearl.
+        replace 'com.mojang.blaze3d.pipeline.RenderPipeline', 'com.mojang.renderpearl.api.pipeline.RenderPipeline'
+        replace 'Lcom/mojang/blaze3d/pipeline/RenderPipeline;', 'Lcom/mojang/renderpearl/api/pipeline/RenderPipeline;'
+
+        // 26.3: a pack plus its overlays is now an OverlayedPackResources.
+        replace 'CompositePackResources', 'OverlayedPackResources'
+    }
 }
 
 loom {
@@ -33,32 +86,35 @@ fabricApi {
 }
 
 repositories {
-    // Add repositories to retrieve artifacts from in here.
-    // You should only use this when depending on other mods because
-    // Loom adds the essential maven repositories to download Minecraft and libraries from automatically.
-    // See https://docs.gradle.org/current/userguide/declaring_repositories.html
-    // for more information about repositories.
+    // Loom adds the Minecraft and library repositories automatically; mods would go here.
 }
 
 dependencies {
-    // To change the versions see the gradle.properties file
-    minecraft "com.mojang:minecraft:${project.minecraft_version}"
-    mappings loom.officialMojangMappings()
-    modImplementation "net.fabricmc:fabric-loader:${project.loader_version}"
+    minecraft "com.mojang:minecraft:${mcVersion}"
 
-    modImplementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_version}"
+    if (unobfuscated) {
+        // The game is already in named form, so `mappings` must stay empty and the plain
+        // `implementation` configuration is used instead of `modImplementation`.
+        implementation "net.fabricmc:fabric-loader:${loaderVersion}"
+        implementation "net.fabricmc.fabric-api:fabric-api:${apiVersion}"
+    } else {
+        mappings loom.officialMojangMappings()
+
+        modImplementation "net.fabricmc:fabric-loader:${loaderVersion}"
+        modImplementation "net.fabricmc.fabric-api:fabric-api:${apiVersion}"
+    }
 }
 
 processResources {
     inputs.property "version", project.version
-    inputs.property "minecraft_version", project.minecraft_version
-    inputs.property "loader_version", project.loader_version
-    filteringCharset "UTF-8"
+    inputs.property "minecraft_version", mcVersion
+    inputs.property "loader_version", loaderVersion
+    filteringCharset = "UTF-8"
 
     filesMatching("fabric.mod.json") {
         expand "version": project.version,
-                "minecraft_version": project.minecraft_version,
-                "loader_version": project.loader_version
+                "minecraft_version": mcVersion,
+                "loader_version": loaderVersion
     }
 }
 
@@ -68,34 +124,30 @@ task computeJarChecksum {
         if (jarFile.exists()) {
             def digest = MessageDigest.getInstance("SHA-256")
             digest.update(Files.readAllBytes(jarFile.toPath()))
-            def checksum = HexFormat.of().formatHex(digest.digest()).toLowerCase()
-            println "JAR SHA256: $checksum"
-            
-            def tamperProtectionFile = file("src/client/java/lol/bkd/antichud/client/TamperProtection.java")
-            def content = tamperProtectionFile.getText('UTF-8')
-            content = content.replace('"${jar_sha256}"', '"' + checksum + '"')
-            tamperProtectionFile.write(content, 'UTF-8')
-            println "Updated TamperProtection.java with checksum"
+            println "JAR SHA256: ${HexFormat.of().formatHex(digest.digest()).toLowerCase()}"
         } else {
             println "JAR not found at: $jarFile"
         }
     }
 }
 
-tasks.named('remapJar') { task ->
-    task.finalizedBy('computeJarChecksum')
+// Obfuscated builds produce the mod through remapJar, unobfuscated ones go straight through jar.
+if (tasks.findByName('remapJar') != null) {
+    tasks.named('remapJar') { task ->
+        task.finalizedBy('computeJarChecksum')
+    }
+} else {
+    tasks.named('jar') { task ->
+        task.finalizedBy('computeJarChecksum')
+    }
 }
 
-def targetJavaVersion = 21
 tasks.withType(JavaCompile).configureEach {
     // ensure that the encoding is set to UTF-8, no matter what the system default is
     // this fixes some edge cases with special characters not displaying correctly
     // see http://yodaconditions.net/blog/fix-for-java-file-encoding-problems-with-gradle.html
-    // If Javadoc is generated, this must be specified in that task too.
     it.options.encoding = "UTF-8"
-    if (targetJavaVersion >= 10 || JavaVersion.current().isJava10Compatible()) {
-        it.options.release.set(targetJavaVersion)
-    }
+    it.options.release.set(targetJavaVersion)
 }
 
 java {
@@ -126,7 +178,6 @@ publishing {
 
     // See https://docs.gradle.org/current/userguide/publishing_maven.html for information on how to set up publishing.
     repositories {
-        // Add repositories to publish to here.
         // Notice: This block does NOT have the same function as the block in the top level.
         // The repositories here will be used for publishing your artifact, not for
         // retrieving dependencies.

@@ -2,7 +2,6 @@ package lol.bkd.antichud.update;
 
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
-import net.minecraft.util.Util;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -88,7 +87,7 @@ public final class UpdateBanner {
     public static void openDownloadPage() {
         UpdateChecker.UpdateInfo update = UpdateGate.info();
         String link = update == null ? UpdateChecker.RELEASES_PAGE : update.downloadLink();
-        Util.getPlatform().openUri(link);
+        LinkOpener.open(link);
         System.out.println("[Antichud] Opened " + link);
     }
 

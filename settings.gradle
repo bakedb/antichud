@@ -7,3 +7,21 @@ pluginManagement {
         gradlePluginPortal()
     }
 }
+
+plugins {
+    id 'dev.kikugie.stonecutter' version '0.9.8'
+}
+
+rootProject.name = 'antichud'
+
+// Stonecutter turns every entry below into a subproject under versions/ that shares the
+// sources in src/, and runs build.gradle once per entry.
+stonecutter {
+    // Stonecutter's own controller is written in Kotlin; this project keeps the Groovy DSL.
+    kotlinController = false
+    centralScript = 'build.gradle'
+
+    create(rootProject) {
+        versions '1.21.11', '26.1', '26.1.1', '26.1.2', '26.2', '26.3'
+    }
+}

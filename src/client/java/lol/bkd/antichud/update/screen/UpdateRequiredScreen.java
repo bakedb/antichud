@@ -1,5 +1,6 @@
 package lol.bkd.antichud.update.screen;
 
+import lol.bkd.antichud.update.LinkOpener;
 import lol.bkd.antichud.update.UpdateChecker;
 import lol.bkd.antichud.update.UpdateGate;
 import net.minecraft.client.Minecraft;
@@ -8,7 +9,6 @@ import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
 import net.minecraft.util.FormattedCharSequence;
-import net.minecraft.util.Util;
 
 import java.util.List;
 
@@ -38,7 +38,7 @@ public class UpdateRequiredScreen extends Screen {
         int top = this.height / 2 + 40;
 
         addRenderableWidget(Button.builder(Component.literal("Download update"), button ->
-                        Util.getPlatform().openUri(link))
+                        LinkOpener.open(link))
                 .bounds(left, top, BUTTON_WIDTH, 20)
                 .build());
         addRenderableWidget(Button.builder(Component.literal("Copy link"), button -> {

@@ -52,11 +52,29 @@ public abstract class PackRepositoryMixin {
                 );
                 
                 Pack profile = Pack.readMetaAndCreate(info, new Pack.ResourcesSupplier() {
+                    //? if >=26.3 {
+                    /*@Override
+                    public net.minecraft.server.packs.PackMetadataResources openMetadata(PackLocationInfo location) {
+                        return resourcePack;
+                    }
+
+                    @Override
+                    public java.util.stream.Stream<PackResources> openResources(PackLocationInfo location, Pack.Metadata metadata) {
+                        if (metadata.overlays().isEmpty()) {
+                            return java.util.stream.Stream.of(resourcePack);
+                        }
+                        java.util.List<PackResources> overlays = new java.util.ArrayList<>(metadata.overlays().size());
+                        for (String overlay : metadata.overlays()) {
+                            overlays.add(resourcePack.createOverlay(overlay));
+                        }
+                        return java.util.stream.Stream.of(new OverlayedPackResources(resourcePack, overlays));
+                    }
+                    *///?} else {
                     @Override
                     public PackResources openPrimary(PackLocationInfo location) {
                         return resourcePack;
                     }
-                    
+
                     @Override
                     public PackResources openFull(PackLocationInfo location, Pack.Metadata metadata) {
                         if (metadata.overlays().isEmpty()) {
@@ -68,6 +86,7 @@ public abstract class PackRepositoryMixin {
                         }
                         return new CompositePackResources(resourcePack, overlays);
                     }
+                    //?}
                 }, PackType.CLIENT_RESOURCES, selectionInfo);
                 
                 if (profile != null) {
