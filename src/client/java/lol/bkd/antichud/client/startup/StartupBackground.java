@@ -38,12 +38,17 @@ public final class StartupBackground {
     private static final String FOLDER = "/assets/antichud/textures/gui/startup/";
 
     /**
-     * Tried in order, so a player who drops in both a .png and a .jpg gets the .png. These are the
-     * formats the JDK's ImageIO reads by default, which is what {@link #decode} uses: Minecraft's
-     * own {@code NativeImage.read} calls {@code PngInfo.validateHeader} and rejects anything that
-     * is not a PNG, so it cannot be used for the .jpg the folder invites.
+     * Tried in order, so a player who drops in both a .png and a .jpg gets the .png.
+     *
+     * <p>These are the suffixes {@link #decode} can be handed, and what the JDK's ImageIO reads by
+     * default: Minecraft's own {@code NativeImage.read} calls {@code PngInfo.validateHeader} and
+     * rejects anything that is not a PNG, so it cannot be used for the .jpg the folder invites.
+     *
+     * <p>A deliberate subset - ImageIO also reads .wbmp, which is a 1-bit mobile format with no
+     * business being a background. Note that ImageIO hands back only the first frame of an
+     * animated .gif and the first page of a multi-page .tiff, so that is what gets drawn.
      */
-    private static final String[] EXTENSIONS = { ".png", ".jpg", ".jpeg", ".bmp" };
+    private static final String[] EXTENSIONS = { ".png", ".jpg", ".jpeg", ".bmp", ".gif", ".tif", ".tiff" };
 
     /**
      * blur and clamp decide the sampler: linear filtering keeps a photo from looking like a grid of

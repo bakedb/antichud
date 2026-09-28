@@ -9,6 +9,11 @@ import java.util.UUID;
 
 public class BannedModChecker {
     private static final Set<String> BANNED_MODS = Set.of(
+            "undertale-healthbars",
+            "healthbars",
+            "mr_health_indicator",
+            "healthindicatortxf",
+            "healthindicators",
             "wurst",
             "wurstplus",
             "impact",

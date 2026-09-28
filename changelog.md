@@ -1,3 +1,7 @@
+# 0.3.1
+- Added .gif, .tif, and .tiff support to the custom startup screens. Keep in mind that animated images only show the first frame.
+- Added more mods to the banned mods list targeting health indicators.
+
 # 0.3
 - X-ray detection actually works now.
 - Reports are now logged when they succeed, and are deduplicated.
