@@ -16,33 +16,38 @@ import java.awt.image.BufferedImage;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.UncheckedIOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.Locale;
 import java.util.Objects;
+import java.util.Optional;
 
 /**
  * The per-player background for the loading overlay.
  *
- * <p>Drop a file named after the player into {@code assets/antichud/textures/gui/startup/} - for
- * example {@code assets/antichud/textures/gui/startup/ThatBakedBeans.jpg} - and that player gets
- * it behind the logo and the memory bar instead of the flat colour. Players without a file are
- * unaffected and keep the flat colour, so this is purely additive.
+ * <p>The image is a file on disk under {@code config/antichud/startup}, put there by
+ * {@link StartupAssets} from the server rather than shipped in the mod jar. That is what makes
+ * adding or replacing a background a matter of dropping a file on the server instead of
+ * publishing a new build for every supported Minecraft version.
  *
- * <p>The image is read from the mod jar through the classloader rather than through the
- * {@link ResourceManager}, for the same reason {@code LoadingOverlayLogoTextureMixin} does it that
- * way: the loading overlay is on screen <i>because</i> the resource manager is still being built,
- * so it has nothing registered in it yet. The resource manager does eventually become usable, but
- * by then the overlay is already gone.
+ * <p>There is deliberately no bundled copy any more, so a player whose download has not landed -
+ * first launch, offline, server down - gets the flat colour the caller falls back to. The loading
+ * overlay is held on screen by {@link StartupAssets#holds()} for exactly that window, so the
+ * colour is only ever seen by someone who is already past a failed or timed-out download.
+ *
+ * <p>The image is read from disk directly rather than through the {@link ResourceManager}, for the
+ * same reason {@code LoadingOverlayLogoTextureMixin} does it that way: the loading overlay is on
+ * screen <i>because</i> the resource manager is still being built, so it has nothing registered in
+ * it yet. The resource manager does eventually become usable, but by then the overlay is gone.
  */
 public final class StartupBackground {
 
-    private static final String FOLDER = "/assets/antichud/textures/gui/startup/";
-
     /**
-     * Tried in order, so a player who drops in both a .png and a .jpg gets the .png.
+     * Tried in order, so a player who has both a .png and a .jpg gets the .png.
      *
      * <p>These are the suffixes {@link #decode} can be handed, and what the JDK's ImageIO reads by
      * default: Minecraft's own {@code NativeImage.read} calls {@code PngInfo.validateHeader} and
-     * rejects anything that is not a PNG, so it cannot be used for the .jpg the folder invites.
+     * rejects anything that is not a PNG, so it cannot be used for the .jpg the server may hold.
      *
      * <p>A deliberate subset - ImageIO also reads .wbmp, which is a 1-bit mobile format with no
      * business being a background. Note that ImageIO hands back only the first frame of an
@@ -74,13 +79,20 @@ public final class StartupBackground {
     /**
      * Draws the player's background, scaled to cover the whole screen and centred on it.
      *
-     * <p>Safe to call every frame: the file is looked up and the image decoded at most once.
+     * <p>Safe to call every frame: the file is looked up and the image decoded at most once. This
+     * also kicks off the download on the first call, because the player name is not available
+     * any earlier than this - {@code ClientModInitializer} runs before Minecraft has a session.
      *
      * @return true when a background was found and drawn, so the caller can skip its own fill
      */
     public static boolean render(GuiGraphics graphics) {
         Minecraft minecraft = Minecraft.getInstance();
-        Identifier background = resolve(minecraft, minecraft.getUser().getName());
+
+        // Idempotent: the first call starts a daemon thread, the rest return immediately. Only
+        // safe here because it never blocks and never touches the render thread beyond an atomic.
+        StartupAssets.begin();
+
+        Identifier background = resolve(minecraft, StartupAssets.MinecraftUser.name());
         if (background == null) {
             return false;
         }
@@ -113,21 +125,34 @@ public final class StartupBackground {
             return resolvedId;
         }
 
-        if (resolvedId != null) {
-            minecraft.getTextureManager().release(resolvedId);
-        }
-
-        resolved = true;
-        resolvedName = name;
-        resolvedId = null;
-        resolvedWidth = 0;
-        resolvedHeight = 0;
-
+        // No session name yet on the earliest frames. Nothing is committed, because "not known
+        // yet" and "has no background" are different answers and only one of them is final.
         if (name == null) {
             return null;
         }
 
-        String file = findFile(name);
+        Path file = findFile(name);
+        if (file == null && !StartupAssets.settled()) {
+            // The image has not finished arriving. Deliberately not committed.
+            //
+            // Committing this miss is what makes the whole feature look broken: the first
+            // frames of the loading overlay always run before the download lands, so a memoised
+            // miss stays a miss for the rest of the session and the player only sees their
+            // background on the launch *after* this one. Retrying costs one directory listing
+            // per frame for at most the length of one download.
+            return null;
+        }
+
+        if (resolvedId != null) {
+            minecraft.getTextureManager().release(resolvedId);
+            resolvedId = null;
+        }
+
+        resolved = true;
+        resolvedName = name;
+        resolvedWidth = 0;
+        resolvedHeight = 0;
+
         if (file == null) {
             return null;
         }
@@ -143,31 +168,33 @@ public final class StartupBackground {
 
             // Lower cased because an Identifier path may only hold [a-z0-9/._-] and player names
             // are not lower case. The id is only a lookup key - loadContents ignores it and reads
-            // the jar - so folding the case costs nothing, and two names differing only in case
+            // the file - so folding the case costs nothing, and two names differing only in case
             // are the same player as far as Minecraft is concerned anyway.
             Identifier id = Identifier.fromNamespaceAndPath("antichud",
-                    "textures/gui/startup/" + file.toLowerCase(Locale.ROOT));
+                    "textures/gui/startup/" + name.toLowerCase(Locale.ROOT));
             minecraft.getTextureManager().registerAndLoad(id, new StartupTexture(id, file));
             resolvedId = id;
         } catch (Throwable failure) {
-            // A file we ship and cannot read is our bug, not the player's, and it is not worth a
+            // A file we served and cannot read is our bug, not the player's, and it is not worth a
             // crash on the way into the game. Fall back to the plain colour and say so.
-            System.out.println("[Antichud] Startup background '" + file + "' could not be loaded: " + failure);
+            System.out.println("[Antichud] Startup background '" + file.getFileName()
+                    + "' could not be loaded: " + failure);
         }
         return resolvedId;
     }
 
     /**
-     * Finds the background file for a sanitised name, or null if this player has none.
+     * Finds the cached background for a sanitised name, or null if this player has none yet.
      *
      * <p>The exact name wins; the all-lowercase name is tried too, because a launcher reporting
      * "thatbakedbeans" should still find "ThatBakedBeans.jpg".
      */
-    private static String findFile(String name) {
+    private static Path findFile(String name) {
+        Path dir = StartupAssets.cacheDir();
         for (String candidate : new String[] { name, name.toLowerCase(Locale.ROOT) }) {
             for (String extension : EXTENSIONS) {
-                String file = candidate + extension;
-                if (exists(file)) {
+                Path file = dir.resolve(candidate + extension);
+                if (isUsable(file)) {
                     return file;
                 }
             }
@@ -175,19 +202,19 @@ public final class StartupBackground {
         return null;
     }
 
-    private static boolean exists(String file) {
-        try (InputStream in = StartupBackground.class.getResourceAsStream(FOLDER + file)) {
-            return in != null;
-        } catch (IOException ignored) {
+    private static boolean isUsable(Path file) {
+        try {
+            // A leftover .part from a killed download must never be picked up, and neither must a
+            // zero-byte file: ImageIO returns null for both and that surfaces much later as a
+            // texture that never uploads.
+            return Files.isRegularFile(file) && Files.size(file) > 0L;
+        } catch (IOException e) {
             return false;
         }
     }
 
-    private static NativeImage decode(String file) {
-        try (InputStream in = StartupBackground.class.getResourceAsStream(FOLDER + file)) {
-            if (in == null) {
-                throw new IOException("not in the mod jar");
-            }
+    private static NativeImage decode(Path file) {
+        try (InputStream in = Files.newInputStream(file)) {
             BufferedImage image = ImageIO.read(in);
             if (image == null) {
                 throw new IOException("no ImageIO reader for it");
@@ -207,7 +234,7 @@ public final class StartupBackground {
             }
             return nativeImage;
         } catch (IOException e) {
-            throw new UncheckedIOException("Failed to decode " + FOLDER + file, e);
+            throw new UncheckedIOException("Failed to decode " + file, e);
         }
     }
 
@@ -219,7 +246,7 @@ public final class StartupBackground {
      * {@code %2e%2e} would need to climb out of the folder. A name that sanitises to nothing gets
      * no background at all rather than matching a file by accident.
      */
-    private static String sanitise(String username) {
+    static String sanitise(String username) {
         if (username == null) {
             return null;
         }
@@ -238,7 +265,8 @@ public final class StartupBackground {
     }
 
     /**
-     * A texture that decodes from the mod jar and ignores the resource manager it is handed.
+     * A texture that decodes from the cache directory and ignores the resource manager it is
+     * handed.
      *
      * <p>SimpleTexture is the right base: ReloadableTexture re-runs loadContents for every texture
      * it already holds whenever a reload starts, so overriding that one method is what keeps the
@@ -246,9 +274,9 @@ public final class StartupBackground {
      * the loading overlay a second time.
      */
     private static final class StartupTexture extends SimpleTexture {
-        private final String file;
+        private final Path file;
 
-        StartupTexture(Identifier id, String file) {
+        StartupTexture(Identifier id, Path file) {
             super(id);
             this.file = file;
         }

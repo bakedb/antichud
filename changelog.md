@@ -1,3 +1,6 @@
+# 0.3.2
+- Backgrounds now automatically download from a remote server instead of being shipped in the jar.
+
 # 0.3.1
 - Added .gif, .tif, and .tiff support to the custom startup screens. Keep in mind that animated images only show the first frame.
 - Added more mods to the banned mods list targeting health indicators.
